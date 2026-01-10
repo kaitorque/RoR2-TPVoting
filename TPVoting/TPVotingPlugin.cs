@@ -12,7 +12,7 @@ namespace TPVoting
     [BepInPlugin(ModGuid, ModName, ModVer)]
     public class TPVotingPlugin : BaseUnityPlugin
     {
-        public const string ModVer = "1.2.3";
+        public const string ModVer = "1.4.0";
         public const string ModName = "TPVoting";
         public const string ModGuid = "com.Mordrog.TPVoting";
 

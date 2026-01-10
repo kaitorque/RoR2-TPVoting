@@ -20,6 +20,9 @@ NOW WORKS WITH PORTALS! (void is intentionally excluded)
 Find my other mods here: https://thunderstore.io/package/Mordrog/
 
 ### Changelog
+#### 1.4.0
+- Fix for Alloyed Collective changes
+
 #### 1.3.0
 - Fix for Seekers of the Storm changes
 - Added option for TP voting after TP event ended
