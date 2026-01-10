@@ -66,7 +66,7 @@ namespace TPVoting
             TryStartVoting(true);
         }
 
-        private void TeleporterInteraction_ChargedState_OnEnter(On.RoR2.TeleporterInteraction.ChargedState.orig_OnEnter orig, EntityStates.BaseState self)
+        private void TeleporterInteraction_ChargedState_OnEnter(On.RoR2.TeleporterInteraction.ChargedState.orig_OnEnter orig, RoR2.TeleporterInteraction.ChargedState self)
         {
             orig(self);
 

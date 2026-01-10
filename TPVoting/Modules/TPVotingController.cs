@@ -114,7 +114,10 @@ namespace TPVoting
 
         private void VotingMachine_OnVotingEnded()
         {
-            StopCoroutine(majorityTPVotingTimer);
+            if (majorityTPVotingTimer != null)
+            {
+                StopCoroutine(majorityTPVotingTimer);
+            }
             isMajorityTPVotingTimerRunning = false;
             OnTPVotingEnded?.Invoke();
         }

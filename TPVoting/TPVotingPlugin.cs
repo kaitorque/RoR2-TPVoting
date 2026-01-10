@@ -1,6 +1,9 @@
 ﻿using BepInEx;
 using R2API.Utils;
 using RoR2;
+using System.Security.Permissions;
+
+[assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 
 namespace TPVoting
 {
