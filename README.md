@@ -1,3 +1,9 @@
+# RoR2-TPVoting (fork)
+
+Personal fork of [Mordrog/RoR2-TPVoting](https://github.com/Mordrog/RoR2-TPVoting) by Mordrog (MIT license, see `LICENSE`). Work in progress; not published. See `DESIGN.md` for planned changes.
+
+---
+
 # RoR2-TPVoting
 RoR2 mod - provides a voting system for the teleporter in your games
 
