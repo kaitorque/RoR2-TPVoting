@@ -7,13 +7,13 @@ namespace TPVoting
     {
         public static ConfigEntry<string>
             PlayerIsReadyMessages,
+            PlayerCancelMessages,
             IgnoredGameModes;
 
         public static ConfigEntry<uint>
             MajorityVotesCountdownTime;
 
         public static ConfigEntry<bool>
-            UserAutoVoteOnDeath,
-            VoteAfterTPEvent;
+            UserAutoVoteOnDeath;
     }
 }

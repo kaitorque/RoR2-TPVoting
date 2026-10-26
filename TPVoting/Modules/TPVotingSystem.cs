@@ -1,4 +1,7 @@
-﻿using UnityEngine.Networking;
+﻿using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.Networking;
 using RoR2;
 
 namespace TPVoting
@@ -8,89 +11,138 @@ namespace TPVoting
         public TPVotingController TPVotingController { get; private set; }
         private TPLocker tpLocker;
 
-        public bool IsTPUnlocked()
-        {
-            return tpLocker.IsTPUnlocked;
-        }
+        private GameObject voteTarget;
+        private NetworkUserId voteStarterId;
+        private readonly HashSet<GameObject> unlockedExits = new HashSet<GameObject>();
 
         public void Awake()
         {
             TPVotingController = gameObject.AddComponent<TPVotingController>();
-            TPVotingController.OnTPVotingStarted += TPVotingController_OnTPVotingStarted;
             TPVotingController.OnTPVotingEnded += TPVotingController_OnTPVotingEnded;
 
             tpLocker = gameObject.AddComponent<TPLocker>();
-            tpLocker.IsLockedTPInteractable = (NetworkUser user) => { return !TPVotingController.HasUserVoted(user); };
-            tpLocker.OnLockedTPInteractionAttempt += TpLocker_OnLockedTPInteractionAttempt;
+            tpLocker.IsExitLocked = IsExitLocked;
+            tpLocker.OnLockedExitInteractionAttempt += TpLocker_OnLockedExitInteractionAttempt;
 
             On.RoR2.Run.OnServerSceneChanged += Run_OnServerSceneChanged;
-            On.RoR2.TeleporterInteraction.ChargedState.OnEnter += TeleporterInteraction_ChargedState_OnEnter;
         }
 
         public void OnDestroy()
         {
-            TPVotingController.OnTPVotingStarted -= TPVotingController_OnTPVotingStarted;
             TPVotingController.OnTPVotingEnded -= TPVotingController_OnTPVotingEnded;
             Destroy(TPVotingController);
 
-            tpLocker.OnLockedTPInteractionAttempt -= TpLocker_OnLockedTPInteractionAttempt;
+            tpLocker.OnLockedExitInteractionAttempt -= TpLocker_OnLockedExitInteractionAttempt;
             Destroy(tpLocker);
 
             On.RoR2.Run.OnServerSceneChanged -= Run_OnServerSceneChanged;
-            On.RoR2.TeleporterInteraction.ChargedState.OnEnter -= TeleporterInteraction_ChargedState_OnEnter;
         }
 
-        private void TPVotingController_OnTPVotingStarted()
+        private bool IsExitLocked(GameObject exit)
         {
-            tpLocker.IsTPUnlocked = false;
+            return !unlockedExits.Contains(exit) && !UsersHelper.IsOneUserOnly() && CheckIfCurrentStageQualifyForTPVoting();
         }
 
-        private void TPVotingController_OnTPVotingEnded()
+        private void TpLocker_OnLockedExitInteractionAttempt(NetworkUser interactingUser, GameObject exit)
         {
-            tpLocker.IsTPUnlocked = true;
-            ChatHelper.TPUnlocked();
-        }
-
-        private void TpLocker_OnLockedTPInteractionAttempt(NetworkUser interactingUser)
-        {
-            if (!TPVotingController.Vote(interactingUser))
+            if (!TPVotingController.IsVotingStarted())
             {
-                ChatHelper.PlayersNotReady();
+                voteTarget = exit;
+                voteStarterId = interactingUser.id;
+                TPVotingController.StartVoting(interactingUser, TPLocker.GetExitName(exit));
             }
+            else if (exit == voteTarget)
+            {
+                if (!TPVotingController.Vote(interactingUser))
+                {
+                    ChatHelper.PlayersNotReady(TPLocker.GetExitName(voteTarget));
+                }
+            }
+            else
+            {
+                ChatHelper.VoteAlreadyRunning(TPLocker.GetExitName(voteTarget));
+            }
+        }
+
+        private void TPVotingController_OnTPVotingEnded(TPVotingResult result)
+        {
+            var target = voteTarget;
+            voteTarget = null;
+
+            switch (result)
+            {
+                case TPVotingResult.Cancelled:
+                    ChatHelper.VotingCancelled();
+                    break;
+                case TPVotingResult.CountdownFinished:
+                    UnlockExit(target);
+                    break;
+                case TPVotingResult.AllReady:
+                    LeaveThroughExit(target);
+                    break;
+            }
+        }
+
+        private void UnlockExit(GameObject exit)
+        {
+            if (!exit)
+            {
+                return;
+            }
+
+            unlockedExits.Add(exit);
+            ChatHelper.ExitUnlocked(TPLocker.GetExitName(exit));
+        }
+
+        private void LeaveThroughExit(GameObject exit)
+        {
+            if (!exit)
+            {
+                return;
+            }
+
+            var starter = NetworkUser.readOnlyInstancesList.FirstOrDefault(u => u.id.Equals(voteStarterId));
+            var candidates = new[] { starter }.Concat(TPVotingController.GetReadyUsers().Where(u => u != starter));
+
+            unlockedExits.Add(exit);
+            foreach (var user in candidates)
+            {
+                var interactor = GetLivingInteractor(user);
+                if (interactor && TPLocker.IsAvailableFor(exit, interactor))
+                {
+                    ChatHelper.AllReady(TPLocker.GetExitName(exit));
+                    tpLocker.InteractWithoutLock(interactor, exit);
+                    return;
+                }
+            }
+
+            ChatHelper.ExitUnlocked(TPLocker.GetExitName(exit));
+        }
+
+        private static Interactor GetLivingInteractor(NetworkUser user)
+        {
+            if (!user || !user.master)
+            {
+                return null;
+            }
+
+            var body = user.master.GetBody();
+            return body && body.healthComponent && body.healthComponent.alive ? body.GetComponent<Interactor>() : null;
         }
 
         private void Run_OnServerSceneChanged(On.RoR2.Run.orig_OnServerSceneChanged orig, Run self, string sceneName)
         {
             orig(self, sceneName);
 
-            TryStartVoting(true);
-        }
-
-        private void TeleporterInteraction_ChargedState_OnEnter(On.RoR2.TeleporterInteraction.ChargedState.orig_OnEnter orig, RoR2.TeleporterInteraction.ChargedState self)
-        {
-            orig(self);
-
-            if (PluginConfig.VoteAfterTPEvent.Value)
-            {
-                TryStartVoting(false);
-            }
-        }
-
-        private void TryStartVoting(bool showInstruction)
-        {
-            tpLocker.IsTPUnlocked = true;
             TPVotingController.EndVoting();
-            if (UsersHelper.IsOneUserOnly() || !CheckIfCurrentStageQualifyForTPVoting())
-            {
-                return;
-            }
-
-            TPVotingController.StartVoting(showInstruction);
+            voteTarget = null;
+            unlockedExits.Clear();
         }
 
         private bool CheckIfCurrentStageQualifyForTPVoting()
         {
-            return !PluginGlobals.IgnoredStages.Contains(SceneCatalog.GetSceneDefForCurrentScene().baseSceneName);
+            var sceneDef = SceneCatalog.GetSceneDefForCurrentScene();
+            return sceneDef && !PluginGlobals.IgnoredStages.Contains(sceneDef.baseSceneName);
         }
     }
 }

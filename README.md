@@ -1,64 +1,39 @@
-# RoR2-TPVoting (fork)
+# TPVoting (Kaitorque fork)
 
-Personal fork of [Mordrog/RoR2-TPVoting](https://github.com/Mordrog/RoR2-TPVoting) by Mordrog (MIT license, see `LICENSE`). Work in progress; not published. See `DESIGN.md` for planned changes.
+Stops players from **accidentally leaving the stage** while others are still picking up boss items.
 
----
+This is a fork of [TPVoting by Mordrog](https://github.com/Mordrog/RoR2-TPVoting), used under the MIT license (see `LICENSE`). All credit for the original mod goes to Mordrog.
 
-# RoR2-TPVoting
-RoR2 mod - provides a voting system for the teleporter in your games
+**This fork works differently from the original.** The original locks the teleporter at the start of every stage until players vote. This fork leaves the teleporter boss event alone and only protects the moment you **leave the stage**: the charged teleporter, and every portal. Do not install both; the fork refuses to load alongside the original.
 
-### How it works
-Mod will lock players from starting teleporter until voting is passed. To prevent stalling, if half or majority players voted, countdown will begin after which teleporter will be unlocked. Players can vote by writting "r" in chat or by interacting with a portal or teleporter for the first time.  Adequate communication in the game is already made for the player to understand how voting works.
+Only the host needs this mod.
 
-NOW WORKS WITH PORTALS! (void is intentionally excluded)
+## How it works
 
-### Default Config Settings
-| Setting                       | Default Value       |
-| :---------------------------- | :-----------------: |
-| PlayerIsReadyMessages         |       "r,rdy,ready" |
-| IgnoredGameModes              |  "InfiniteTowerRun" |
-| MajorityVotesCountdownTime    |                  30 |
-| UserAutoVoteOnDeath           |                true |
-| VoteAfterTPEvent              |               false |
+1. **Starting the boss event is free.** Anyone can activate the teleporter as in vanilla.
+2. **Pressing a stage exit starts a vote.** When someone presses the charged teleporter or a portal, nobody teleports. Instead, a vote starts for that exit, and the press counts as their vote.
+3. **Join or leave the vote.** Write `r` in chat, or press the same exit, to ready up. Write `f` to take your vote back. Dead players count as ready.
+4. **Half or more ready → countdown.** A countdown starts (30 seconds by default). If votes drop below half, the countdown is cancelled. If nobody is ready any more, the vote ends.
+5. **Everyone ready → leave immediately.** The exit runs at once, with no extra press.
+6. **Countdown finished → exit unlocked.** Nobody is teleported; someone still has to press the exit to leave. The exit stays unlocked for the rest of the stage.
 
-## More
+While a vote is running, pressing a different exit only shows a reminder that a vote is already running. Votes reset on every new stage.
 
-Find my other mods here: https://thunderstore.io/package/Mordrog/
+**Protected exits:** the charged teleporter and every portal (shop, gold, celestial, void, green, Colossus, DLC portals, and anything else that leads to a new stage). Voting is skipped in single player, on final/special stages (Commencement, the Void Fields, A Moment, Whole, the Planetarium, the ending), and in Simulacrum.
 
-### Changelog
-#### 1.4.0
-- Fix for Alloyed Collective changes
+## Config (`kaitorque.TPVoting.cfg`)
 
-#### 1.3.0
-- Fix for Seekers of the Storm changes
-- Added option for TP voting after TP event ended
+| Setting | Default | Description |
+|---|---|---|
+| PlayerIsReadyMessages | `r,rdy,ready` | Chat messages that ready you up (comma-separated) |
+| PlayerCancelMessages | `f` | Chat messages that take your vote back (comma-separated) |
+| MajorityVotesCountdownTime | `30` | Seconds until the exit unlocks once half or more are ready |
+| UserAutoVoteOnDeath | `true` | Dead players count as ready |
+| IgnoredGameModes | `InfiniteTowerRun` | Game modes where voting is off |
 
-#### 1.2.3
-- Update manifest + rebuild on new patch
+## Credits
 
-#### 1.2.2
-- Fix for Survivors of the Void changes
-- Added option to turn off voting on selected game modes
+- Original mod: [Mordrog](https://thunderstore.io/package/Mordrog/) ([source](https://github.com/Mordrog/RoR2-TPVoting))
+- Fork: Kaitorque
 
-#### 1.2.1
-- Fixed issue where players would be auto kicked from dedicated servers if they do not have mod
-- Added "outro" stage to ignored Stages for voting
-- Added new config to let admin decide whenever players should auto vote on death
-
-#### 1.2.0
-- Fix for Anniversary Patch changes
-- Make portals interaction work same as teleporter interaction
-- Players can now vote when they interact with a portal or teleporter for the first time
-- Added new Moon stage to ignored Stages for voting
-
-#### 1.1.0
-- Now works on portals only maps
-- Chat messages should not appear for 1 player only
-
-#### 1.0.2
-- Included all stages without TP to ignored map list
-- Fixed activating on interaction items when trying to start locked TP, which made fireworks and squids an actually usefull items. No more.
-- Fixed players voting on death on disabled stages
-
-#### 1.0.1
-- Fixed checking for majority of players
+See `CHANGELOG.md` for changes.

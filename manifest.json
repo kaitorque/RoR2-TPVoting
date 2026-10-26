@@ -1,8 +1,8 @@
 {
     "name": "TPVoting",
-    "version_number": "1.4.0",
-    "website_url": "https://github.com/Mordrog/RoR2-TPVoting",
-    "description": "The mod should provide a voting system for teleporter and portals in your games.",
+    "version_number": "1.5.0",
+    "website_url": "",
+    "description": "Fork of Mordrog's TPVoting. Stops players leaving the stage by accident: pressing a charged teleporter or any portal starts a vote instead. The boss event starts freely. Host-only.",
     "dependencies": [
         "bbepis-BepInExPack-5.4.2121",
         "RiskofThunder-R2API_Prefab-1.1.1"

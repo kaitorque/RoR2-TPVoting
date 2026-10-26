@@ -26,15 +26,26 @@ namespace TPVoting
         public delegate void VoterVoted(VoterID voterID);
         public event VoterVoted OnVoterVoted;
 
+        public delegate void VoterUnvoted(VoterID voterID);
+        public event VoterUnvoted OnVoterUnvoted;
+
         public delegate void VoterRemoved(VoterID voterID);
         public event VoterRemoved OnVoterRemoved;
 
-        public void StartVoting(IReadOnlyCollection<VoterID> voterIDs)
+        public void StartVoting(IReadOnlyCollection<VoterID> voterIDs, IEnumerable<VoterID> initialVoterIDs = null)
         {
             votes.Clear();
             foreach (var voterID in voterIDs)
             {
                 votes[voterID] = false;
+            }
+
+            if (initialVoterIDs != null)
+            {
+                foreach (var voterID in initialVoterIDs.Where(votes.ContainsKey))
+                {
+                    votes[voterID] = true;
+                }
             }
 
             IsVotingStarted = true;
@@ -64,16 +75,40 @@ namespace TPVoting
                 return false;
             }
 
-            if (votes.ContainsKey(voterID) && !votes[voterID])
+            if (!votes.TryGetValue(voterID, out bool vote))
             {
-                votes[voterID] = true;
+                UnityEngine.Debug.LogWarning($"VotingMachine::Vote: Failed to find voter ID {voterID} in voter list");
+                return false;
+            }
 
-                OnVoterVoted?.Invoke(voterID);
+            if (vote)
+            {
+                return false;
+            }
+
+            votes[voterID] = true;
+
+            OnVoterVoted?.Invoke(voterID);
+            PostVotingUpdate();
+            return true;
+        }
+
+        public bool Unvote(VoterID voterID)
+        {
+            if (!IsVotingStarted)
+            {
+                return false;
+            }
+
+            if (votes.TryGetValue(voterID, out bool vote) && vote)
+            {
+                votes[voterID] = false;
+
+                OnVoterUnvoted?.Invoke(voterID);
                 PostVotingUpdate();
                 return true;
             }
 
-            UnityEngine.Debug.LogWarning($"VotingMachine::Vote: Failed to find voter ID {voterID} in voter list");
             return false;
         }
 
@@ -111,6 +146,11 @@ namespace TPVoting
             return votes.TryGetValue(voterID, out bool vote) && vote;
         }
 
+        public int CountVotes()
+        {
+            return votes.Count(kv => kv.Value == true);
+        }
+
         public bool CheckIfAllVoted()
         {
             return votes.All(kv => kv.Value == true);
@@ -123,7 +163,7 @@ namespace TPVoting
 
         public bool CheckIfHalfOrMoreVoted()
         {
-            return votes.Count(kv => kv.Value == true) >= UnityEngine.Mathf.CeilToInt((float)votes.Count / 2);
+            return CountVotes() >= UnityEngine.Mathf.CeilToInt((float)votes.Count / 2);
         }
     }
 }

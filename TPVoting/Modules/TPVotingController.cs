@@ -2,20 +2,26 @@
 using RoR2;
 using System.Linq;
 using System.Collections;
-using System;
+using System.Collections.Generic;
 
 namespace TPVoting
 {
+    public enum TPVotingResult
+    {
+        Reset,
+        Cancelled,
+        AllReady,
+        CountdownFinished
+    }
+
     public class TPVotingController : NetworkBehaviour
     {
         private VotingMachine<NetworkUserId> votingMachine = new VotingMachine<NetworkUserId>();
         private IEnumerator majorityTPVotingTimer;
         private bool isMajorityTPVotingTimerRunning;
+        private TPVotingResult votingResult;
 
-        public delegate void TPVotingStarted();
-        public event TPVotingStarted OnTPVotingStarted;
-
-        public delegate void TPVotingEnded();
+        public delegate void TPVotingEnded(TPVotingResult result);
         public event TPVotingEnded OnTPVotingEnded;
 
         public bool IsVotingStarted()
@@ -28,43 +34,60 @@ namespace TPVoting
             return user && votingMachine.CheckIfVoted(user.id);
         }
 
+        public IEnumerable<NetworkUser> GetReadyUsers()
+        {
+            return NetworkUser.readOnlyInstancesList.Where(HasUserVoted);
+        }
+
         public bool Vote(NetworkUser user)
         {
             return user && votingMachine.IsVotingStarted && votingMachine.Vote(user.id);
         }
 
-        public void StartVoting(bool showInstruction = true)
+        public void StartVoting(NetworkUser starter, string targetName)
         {
             if (votingMachine.IsVotingStarted)
             {
                 return;
             }
 
-            votingMachine.StartVoting(NetworkUser.readOnlyInstancesList.Select(l => l.id).ToList());
-
-            if (showInstruction)
+            var initialVoters = new List<NetworkUserId> { starter.id };
+            if (PluginConfig.UserAutoVoteOnDeath.Value)
             {
-                StartCoroutine(ShowVotingInstruction());
-                IEnumerator ShowVotingInstruction()
-                {
-                    yield return new UnityEngine.WaitForSeconds(3);
-                    ChatHelper.VotingInstruction();
-                }
+                initialVoters.AddRange(NetworkUser.readOnlyInstancesList.Where(u => u.master && u.master.IsDeadAndOutOfLivesServer()).Select(u => u.id));
             }
+
+            var users = NetworkUser.readOnlyInstancesList;
+            ChatHelper.VotingStarted(starter.userName, targetName, users.Count(u => initialVoters.Contains(u.id)), users.Count);
+
+            votingMachine.StartVoting(users.Select(u => u.id).ToList(), initialVoters);
         }
 
         public void EndVoting()
         {
             if (votingMachine.IsVotingStarted)
             {
+                votingResult = TPVotingResult.Reset;
                 votingMachine.EndVoting();
             }
         }
 
         public void Awake()
         {
-            votingMachine.CheckVotingEndCondition = (VotingMachine<NetworkUserId> votingMachine) => 
+            votingMachine.CheckVotingEndCondition = (VotingMachine<NetworkUserId> votingMachine) =>
             {
+                if (votingMachine.CountVotes() == 0)
+                {
+                    votingResult = TPVotingResult.Cancelled;
+                    return true;
+                }
+
+                if (votingMachine.CheckIfAllVoted())
+                {
+                    votingResult = TPVotingResult.AllReady;
+                    return true;
+                }
+
                 if (votingMachine.CheckIfHalfOrMoreVoted())
                 {
                     if (!isMajorityTPVotingTimerRunning)
@@ -78,18 +101,24 @@ namespace TPVoting
                         {
                             isMajorityTPVotingTimerRunning = true;
                             yield return new UnityEngine.WaitForSeconds(unlockTime);
-                            votingMachine.EndVoting();
                             isMajorityTPVotingTimerRunning = false;
+                            votingResult = TPVotingResult.CountdownFinished;
+                            votingMachine.EndVoting();
                         }
                     }
                 }
+                else if (isMajorityTPVotingTimerRunning)
+                {
+                    StopMajorityTPVotingTimer();
+                    ChatHelper.TPCountdownCancelled();
+                }
 
-                return votingMachine.CheckIfAllVoted() || votingMachine.CheckIfThereIsOnlyOneVoter();
+                return false;
             };
 
-            votingMachine.OnVotingStarted += VotingMachine_OnVotingStarted;
             votingMachine.OnVotingEnded += VotingMachine_OnVotingEnded;
             votingMachine.OnVoterVoted += VotingMachine_OnVoterVoted;
+            votingMachine.OnVoterUnvoted += VotingMachine_OnVoterUnvoted;
 
             On.RoR2.CharacterMaster.OnBodyDeath += CharacterMaster_OnBodyDeath;
             On.RoR2.NetworkUser.OnDestroy += NetworkUser_OnDestroy;
@@ -98,28 +127,29 @@ namespace TPVoting
 
         public void OnDestroy()
         {
-            votingMachine.OnVotingStarted -= VotingMachine_OnVotingStarted;
             votingMachine.OnVotingEnded -= VotingMachine_OnVotingEnded;
             votingMachine.OnVoterVoted -= VotingMachine_OnVoterVoted;
+            votingMachine.OnVoterUnvoted -= VotingMachine_OnVoterUnvoted;
 
             On.RoR2.CharacterMaster.OnBodyDeath -= CharacterMaster_OnBodyDeath;
             On.RoR2.NetworkUser.OnDestroy -= NetworkUser_OnDestroy;
             On.RoR2.Chat.SendBroadcastChat_ChatMessageBase -= Chat_SendBroadcastChat_ChatMessageBase;
         }
 
-        private void VotingMachine_OnVotingStarted()
-        {
-            OnTPVotingStarted?.Invoke();
-        }
-
-        private void VotingMachine_OnVotingEnded()
+        private void StopMajorityTPVotingTimer()
         {
             if (majorityTPVotingTimer != null)
             {
                 StopCoroutine(majorityTPVotingTimer);
+                majorityTPVotingTimer = null;
             }
             isMajorityTPVotingTimerRunning = false;
-            OnTPVotingEnded?.Invoke();
+        }
+
+        private void VotingMachine_OnVotingEnded()
+        {
+            StopMajorityTPVotingTimer();
+            OnTPVotingEnded?.Invoke(votingResult);
         }
 
         private void VotingMachine_OnVoterVoted(NetworkUserId voterID)
@@ -129,6 +159,16 @@ namespace TPVoting
             {
                 var usersVotes = votingMachine.Votes;
                 ChatHelper.UserIsReady(user.userName, usersVotes.Count(ks => ks.Value == true), usersVotes.Count);
+            }
+        }
+
+        private void VotingMachine_OnVoterUnvoted(NetworkUserId voterID)
+        {
+            var user = NetworkUser.readOnlyInstancesList.FirstOrDefault(l => l.id.Equals(voterID));
+            if (user)
+            {
+                var usersVotes = votingMachine.Votes;
+                ChatHelper.UserIsNotReady(user.userName, usersVotes.Count(ks => ks.Value == true), usersVotes.Count);
             }
         }
 
@@ -185,6 +225,13 @@ namespace TPVoting
                             return;
                         }
                     }
+                    else if (CheckIfCancelMessage(preparedMessage))
+                    {
+                        if (votingMachine.Unvote(user.id))
+                        {
+                            return;
+                        }
+                    }
                 }
             }
 
@@ -194,6 +241,11 @@ namespace TPVoting
         private bool CheckIfReadyMessage(string message)
         {
             return PluginConfig.PlayerIsReadyMessages.Value.Split(',').Contains(message);
+        }
+
+        private bool CheckIfCancelMessage(string message)
+        {
+            return PluginConfig.PlayerCancelMessages.Value.Split(',').Contains(message);
         }
     }
 }

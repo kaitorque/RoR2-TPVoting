@@ -1,104 +1,112 @@
-﻿using System;
-using System.Reflection;
-using MonoMod.RuntimeDetour;
+﻿using System.Linq;
 using RoR2;
+using UnityEngine;
 using UnityEngine.Networking;
 
 namespace TPVoting
 {
     public class TPLocker : NetworkBehaviour
     {
-        public bool IsTPUnlocked = true;
+        public delegate bool ExitLockCheck(GameObject exit);
+        public ExitLockCheck IsExitLocked { get; set; } = (GameObject exit) => { return false; };
 
-        public delegate bool LockedTPInteractibility(NetworkUser user);
-        public LockedTPInteractibility IsLockedTPInteractable { get; set; } = (NetworkUser user) => { return true; };
+        public delegate void LockedExitInteractionAttempt(NetworkUser interactingUser, GameObject exit);
+        public event LockedExitInteractionAttempt OnLockedExitInteractionAttempt;
 
-        public delegate void LockedTPInteractionAttempt(NetworkUser interactingUser);
-        public event LockedTPInteractionAttempt OnLockedTPInteractionAttempt;
-
-        public delegate Interactability orig_GetInteractability(GenericInteraction self, Interactor activator);
-        public Hook hook_GetInteractability;
-
-        public delegate void orig_OnInteractionBegin(GenericInteraction self, Interactor activator);
-        public Hook hook_OnInteractionBegin;
+        private bool bypassLock;
 
         public void Awake()
         {
-            On.RoR2.TeleporterInteraction.GetInteractability += TeleporterInteraction_GetInteractability;
-            On.RoR2.TeleporterInteraction.OnInteractionBegin += TeleporterInteraction_OnInteractionBegin;
-
-            hook_GetInteractability = new Hook(typeof(GenericInteraction).GetMethod("RoR2.IInteractable.GetInteractability", BindingFlags.NonPublic | BindingFlags.Instance), typeof(TPLocker).GetMethod("GenericInteraction_GetInteractability"), this, new HookConfig());
-            hook_OnInteractionBegin = new Hook(typeof(GenericInteraction).GetMethod("RoR2.IInteractable.OnInteractionBegin", BindingFlags.NonPublic | BindingFlags.Instance), typeof(TPLocker).GetMethod("GenericInteraction_OnInteractionBegin"), this, new HookConfig());
+            On.RoR2.Interactor.PerformInteraction += Interactor_PerformInteraction;
+            On.RoR2.SceneExitController.OnEnable += SceneExitController_OnEnable;
+            On.RoR2.SceneExitController.Begin += SceneExitController_Begin;
         }
 
         public void OnDestroy()
         {
-            On.RoR2.TeleporterInteraction.GetInteractability -= TeleporterInteraction_GetInteractability;
-            On.RoR2.TeleporterInteraction.OnInteractionBegin -= TeleporterInteraction_OnInteractionBegin;
-
-            hook_GetInteractability.Dispose();
-            hook_OnInteractionBegin.Dispose();
+            On.RoR2.Interactor.PerformInteraction -= Interactor_PerformInteraction;
+            On.RoR2.SceneExitController.OnEnable -= SceneExitController_OnEnable;
+            On.RoR2.SceneExitController.Begin -= SceneExitController_Begin;
         }
 
-        private Interactability TeleporterInteraction_GetInteractability(On.RoR2.TeleporterInteraction.orig_GetInteractability orig, TeleporterInteraction self, Interactor activator)
+        public static bool IsStageExit(GameObject interactableObject)
         {
-            return GetInteractability(orig, self, activator);
+            if (!interactableObject || interactableObject.GetComponent<SeerStationController>())
+            {
+                return false;
+            }
+
+            if (interactableObject.TryGetComponent<TeleporterInteraction>(out var teleporter))
+            {
+                return teleporter.activationState == TeleporterInteraction.ActivationState.Charged;
+            }
+
+#pragma warning disable CS0618
+            return interactableObject.GetComponentInParent<SceneExitController>() || interactableObject.GetComponentInChildren<SceneExitController>()
+                || interactableObject.GetComponentInParent<SceneExitControllerColossusPortal>() || interactableObject.GetComponentInChildren<SceneExitControllerColossusPortal>();
+#pragma warning restore CS0618
         }
 
-        // Called only if TeleporterInteraction_GetInteractability returns Interactability.Available
-        private void TeleporterInteraction_OnInteractionBegin(On.RoR2.TeleporterInteraction.orig_OnInteractionBegin orig, TeleporterInteraction self, Interactor activator)
+        public static bool IsAvailableFor(GameObject interactableObject, Interactor interactor)
         {
-            OnInteractionBegin(orig, self, activator);
+            return interactableObject && interactor
+                && interactableObject.GetComponents<IInteractable>().Any(i => i.GetInteractability(interactor) == Interactability.Available);
         }
 
-        public Interactability GenericInteraction_GetInteractability(orig_GetInteractability orig, GenericInteraction self, Interactor activator)
+        public static string GetExitName(GameObject exit)
         {
-            if (!self.name.ToLower().Contains("portal"))
+            if (!exit)
             {
-                orig(self, activator);
+                return "exit";
             }
 
-            return GetInteractability(orig, self, activator);
+            var displayName = exit.GetComponent<IDisplayNameProvider>()?.GetDisplayName();
+            return string.IsNullOrEmpty(displayName) ? exit.name : displayName;
         }
 
-        // Called only if GenericInteraction_GetInteractability returns Interactability.Available
-        public void GenericInteraction_OnInteractionBegin(orig_OnInteractionBegin orig, GenericInteraction self, Interactor activator)
+        public void InteractWithoutLock(Interactor interactor, GameObject exit)
         {
-            if (!self.name.ToLower().Contains("portal"))
+            bypassLock = true;
+            try
             {
-                orig(self, activator);
+                interactor.AttemptInteraction(exit);
             }
-
-            OnInteractionBegin(orig, self, activator);
-        }
-
-        private Interactability GetInteractability<ORIG, SELF>(ORIG orig, SELF self, Interactor activator) where ORIG : Delegate
-        {
-            var user = UsersHelper.GetUser(activator);
-            if (IsTPUnlocked || (user && IsLockedTPInteractable(user)))
+            finally
             {
-                return (Interactability)orig.DynamicInvoke(self, activator);
-            }
-            else
-            {
-                return Interactability.ConditionsNotMet;
+                bypassLock = false;
             }
         }
 
-        private void OnInteractionBegin<ORIG, SELF>(ORIG orig, SELF self, Interactor activator) where ORIG : Delegate
+        private void Interactor_PerformInteraction(On.RoR2.Interactor.orig_PerformInteraction orig, Interactor self, GameObject interactableObject)
         {
-            if (IsTPUnlocked)
+            if (bypassLock || !NetworkServer.active || !IsStageExit(interactableObject) || !IsExitLocked(interactableObject) || !IsAvailableFor(interactableObject, self))
             {
-                orig.DynamicInvoke(self, activator);
+                orig(self, interactableObject);
+                return;
             }
-            else
+
+            var user = UsersHelper.GetUser(self);
+            if (!user)
             {
-                var user = UsersHelper.GetUser(activator);
-                if (user)
-                {
-                    OnLockedTPInteractionAttempt?.Invoke(user);
-                }
+                orig(self, interactableObject);
+                return;
             }
+
+            OnLockedExitInteractionAttempt?.Invoke(user, interactableObject);
+        }
+
+        private void SceneExitController_OnEnable(On.RoR2.SceneExitController.orig_OnEnable orig, SceneExitController self)
+        {
+            orig(self);
+
+            var interactables = self.GetComponentsInParent<IInteractable>().Concat(self.GetComponentsInChildren<IInteractable>()).Distinct();
+            Log.Info($"Protected stage exit: {self.name} (interactables: {string.Join(", ", interactables.Select(i => i.GetType().Name))})");
+        }
+
+        private void SceneExitController_Begin(On.RoR2.SceneExitController.orig_Begin orig, SceneExitController self)
+        {
+            Log.Info($"Stage exit begun: {self.name}");
+            orig(self);
         }
     }
 }

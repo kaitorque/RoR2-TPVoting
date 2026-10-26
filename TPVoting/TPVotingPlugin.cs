@@ -8,18 +8,21 @@ using System.Security.Permissions;
 namespace TPVoting
 {
     [BepInDependency("com.bepis.r2api")]
+    [BepInIncompatibility(OriginalModGuid)]
     [NetworkCompatibility(CompatibilityLevel.NoNeedForSync)]
     [BepInPlugin(ModGuid, ModName, ModVer)]
     public class TPVotingPlugin : BaseUnityPlugin
     {
-        public const string ModVer = "1.4.0";
+        public const string ModVer = "1.5.0";
         public const string ModName = "TPVoting";
-        public const string ModGuid = "com.Mordrog.TPVoting";
+        public const string ModGuid = "kaitorque.TPVoting";
+        public const string OriginalModGuid = "com.Mordrog.TPVoting";
 
         public TPVotingSystem TPVotingSystem { get; private set; }
 
         public TPVotingPlugin()
         {
+            Log.Logger = Logger;
             InitConfig();
         }
 
@@ -61,6 +64,13 @@ namespace TPVoting
                 "The message the player has to write in the chat to confirm they are ready. Values must be separated by comma."
             );
 
+            PluginConfig.PlayerCancelMessages = Config.Bind<string>(
+                "Settings",
+                "PlayerCancelMessages",
+                "f",
+                "The message the player has to write in the chat to remove their vote. Values must be separated by comma."
+            );
+
             PluginConfig.IgnoredGameModes = Config.Bind<string>(
                 "Settings",
                 "IgnoredGameModes",
@@ -72,7 +82,7 @@ namespace TPVoting
                 "Settings",
                 "MajorityVotesCountdownTime",
                 30,
-                "Countdown in seconds to unlock the teleporter when half or most of the players are ready."
+                "Countdown in seconds to unlock the voted exit when half or most of the players are ready."
             );
 
             PluginConfig.UserAutoVoteOnDeath = Config.Bind<bool>(
@@ -82,12 +92,6 @@ namespace TPVoting
                 "Should players auto vote tp when they die."
             );
 
-            PluginConfig.VoteAfterTPEvent = Config.Bind<bool>(
-                "Settings",
-                "VoteAfterTPEvent",
-                false,
-                "Should tp voting also be activated after tp event."
-            );
         }
     }
 }
