@@ -47,7 +47,9 @@ Today, voting ending simply unlocks everything, and someone must press the exit 
 
 ### 4.1 What is protected
 
-- **Stage exits are protected:** the teleporter once charged (pressing it leaves the stage), and portals (shop/blue, gold, celestial, void, green, and any other `GenericInteraction` portal the mod already detects). Check whether void portals are excluded upstream ("void is intentionally excluded" in the README); the owner wants them included.
+- **Owner's rule: anything that takes the players to a new stage is protected.** That includes the teleporter once charged (pressing it leaves the stage), every portal (shop/blue, gold, celestial, void, green, Colossus, and DLC portals), and any other interactable that starts a stage change. Void portals are included, although upstream excludes them on purpose ("void is intentionally excluded" in the README).
+- **Detection: use the game's stage-change component, not names.** Every stage change goes through `SceneExitController.Begin()` (`_decomp\RoR2\SceneExitController.cs`). Treat an interactable as a stage exit when its GameObject (or its parent/children) has a `SceneExitController`. The teleporter owns one, and portal prefabs do too. Replace the current `name.Contains("portal")` check with this. The current hooks only cover `TeleporterInteraction` and `GenericInteraction`, so also check the other interactable types that lead to an exit (for example `MeridianEventTriggerInteraction`, `SceneExitControllerColossusPortal`, `PortalDialerController`; search `_decomp` for `SceneExitController` usages), and log the name of each exit the mod protects so missing ones are easy to spot in testing.
+- Interactables that only *choose* the next destination without leaving (for example `SeerStationController`) are not exits.
 - **Not protected:** starting the teleporter boss event (teleporter idle state). Remove the automatic voting on scene change. `VoteAfterTPEvent` no longer applies; remove it from the config.
 - Keep `PluginGlobals.IgnoredStages`, `IgnoredGameModes`, and the single-player bypass.
 
