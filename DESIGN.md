@@ -4,11 +4,11 @@ This is the working brief for changing this fork of [Mordrog/RoR2-TPVoting](http
 
 ## 1. Goal
 
-**Today:** pressing a locked teleporter or portal only casts your vote. Once voting passes, the teleporter unlocks and someone has to press it **a second time**.
+Stop players from **accidentally leaving the stage** after the boss is cleared, while others are still picking up boss items. The owner plays with 4 players and the Artifact of Potential, so boss items are pick-1-of-3 orbs that take time to choose.
 
-**Wanted:** press once. Your press is remembered, and when voting passes, the teleporter (or portal) starts automatically for you. No second press.
+The teleporter boss event itself should **not** need a vote; anyone can start it freely, like vanilla.
 
-The owner uses `VoteAfterTPEvent = true`, so voting also locks the charged teleporter after the boss. The point is to stop players from accidentally leaving the stage while others are still picking boss items (they use the Artifact of Potential, so boss items are pick-1-of-3 orbs).
+Keep someone near the exit: voting only unlocks the exit, and a player still presses it to leave. The only exception is when everyone readies up before the countdown ends.
 
 ### Constraints
 
@@ -26,7 +26,7 @@ The owner uses `VoteAfterTPEvent = true`, so voting also locks the charged telep
 | Game | Risk of Rain 2 1.5.0, at `E:\SteamLibrary\steamapps\common\Risk of Rain 2` |
 | r2modman profile | `%APPDATA%\r2modmanPlus-local\RiskOfRain2\profiles\VP\BepInEx` |
 | Installed original | `plugins\Mordrog-TPVoting\TPVoting.dll` (1.4.0) |
-| Owner's config | `config\com.Mordrog.TPVoting.cfg` (`VoteAfterTPEvent = true`, `MajorityVotesCountdownTime = 30`) |
+| Owner's config | `config\com.Mordrog.TPVoting.cfg` (`VoteAfterTPEvent = true`, `MajorityVotesCountdownTime = 30`, `PlayerIsReadyMessages = r,rdy,ready`, `UserAutoVoteOnDeath = true`) |
 | Decompiled game source | `F:\Mod\RoR2\_decomp` |
 | Reference build setup | `F:\Mod\RoR2\MonsoonLikeDrizzle` (csproj + `package.ps1`) |
 
@@ -35,43 +35,47 @@ The owner uses `VoteAfterTPEvent = true`, so voting also locks the charged telep
 | File | Role |
 |---|---|
 | `TPVotingPlugin.cs` | Plugin entry. Adds `TPVotingSystem` to each run (except ignored game modes). Binds the config. |
-| `Modules/TPVotingSystem.cs` | Starts voting on scene change and (with `VoteAfterTPEvent`) when the teleporter finishes charging. Locks/unlocks via `TPLocker`. A locked interaction attempt casts a vote. |
-| `Modules/TPLocker.cs` | Hooks `TeleporterInteraction` and portal `GenericInteraction`s. While locked, `GetInteractability` lets only players who haven't voted interact, and `OnInteractionBegin` raises `OnLockedTPInteractionAttempt` **instead of running the original interaction**. |
-| `Modules/TPVotingController.cs` | Voting state. Ends voting when everyone has voted, or 30 s (configurable) after half or more have voted. Chat `r`/`rdy`/`ready` also votes. Dead players auto-vote. |
-| `Modules/VotingMachine.cs` | Generic vote bookkeeping. |
+| `Modules/TPVotingSystem.cs` | Starts voting **automatically** on scene change and (with `VoteAfterTPEvent`) when the teleporter finishes charging. Locks/unlocks via `TPLocker`. A locked interaction attempt casts a vote. |
+| `Modules/TPLocker.cs` | Hooks `TeleporterInteraction` and portal `GenericInteraction`s (name contains `portal`). While locked, `GetInteractability` lets only players who haven't voted interact, and `OnInteractionBegin` raises `OnLockedTPInteractionAttempt` **instead of running the original interaction**. One global lock for all exits. |
+| `Modules/TPVotingController.cs` | Voting state. Ends voting when everyone has voted, or `MajorityVotesCountdownTime` seconds after half or more have voted. Chat `r`/`rdy`/`ready` votes. Dead players auto-vote. |
+| `Modules/VotingMachine.cs` | Generic vote bookkeeping. No way to remove a vote yet. |
+| `PluginGlobals.cs` | Stages where voting never applies (`arena`, `moon`, `moon2`, `limbo`, `outro`, `voidraid`). |
 
-The voting-passed path: `VotingMachine.EndVoting` → `TPVotingController.VotingMachine_OnVotingEnded` → `OnTPVotingEnded` → `TPVotingSystem.TPVotingController_OnTPVotingEnded`, which sets `IsTPUnlocked = true` and posts "Teleporter is unlocked".
+Today, voting ending simply unlocks everything, and someone must press the exit again.
 
-## 4. Changes
+## 4. New behaviour
 
-### 4.1 Auto-start after voting passes (main feature)
+### 4.1 What is protected
 
-Decisions from the owner:
+- **Stage exits are protected:** the teleporter once charged (pressing it leaves the stage), and portals (shop/blue, gold, celestial, void, green, and any other `GenericInteraction` portal the mod already detects). Check whether void portals are excluded upstream ("void is intentionally excluded" in the README); the owner wants them included.
+- **Not protected:** starting the teleporter boss event (teleporter idle state). Remove the automatic voting on scene change. `VoteAfterTPEvent` no longer applies; remove it from the config.
+- Keep `PluginGlobals.IgnoredStages`, `IgnoredGameModes`, and the single-player bypass.
 
-- **Trigger:** auto-start when voting passes **either way**: everyone ready, or the majority countdown finishing.
-- If nobody pressed the teleporter (everyone voted by chat), behave as today: just unlock.
-- If fewer than half are ready, no countdown runs and it stays locked. That is the intended protection; don't change it.
+### 4.2 Flow
 
-Design:
+1. **Press to start.** The first player to press a protected exit starts a vote **for that exit** (the vote's *target*). That press counts as their vote. Nothing teleports. Post a chat line naming the player and the target, and explaining `r` / `f`.
+2. **Join or leave the vote.**
+   - Type `r` (`PlayerIsReadyMessages`) or press the target exit → vote ready.
+   - Type `f` (new `PlayerCancelMessages`, default `f`) → remove your vote.
+   - Dead players auto-vote (`UserAutoVoteOnDeath`), as today.
+   - Post the ready count after every change, as today.
+3. **Half or more ready → countdown.** Start the `MajorityVotesCountdownTime` (30 s) countdown, as today.
+   - If votes drop **below half** (players typed `f`), **cancel the countdown** and say so in chat.
+   - If votes drop to **zero**, **end the vote**: clear the target; the next press on any protected exit starts a new vote.
+4. **Everyone ready before the countdown ends → leave immediately.** Run the target's original interaction for the **player who started the vote**, with no extra press. If that player is gone, dead, or can't use the target (`GetInteractability` isn't `Available`), use another ready player who is alive; if none qualify, just unlock the target (as in step 5).
+5. **Countdown finishes → unlock the target only.** Nobody is teleported. Any player can now press the target to leave, so someone has to be at the exit. Post a chat line saying the exit is unlocked.
+6. **Pressing a different exit during a vote** does not start a second vote. Tell the player a vote is already running for the target, and that typing `f` cancels it.
+7. Reset all vote state on scene change.
 
-1. In `TPLocker.OnInteractionBegin`, on the locked path, remember the **first** press as a pending interaction: the interactable (`self`), the `Interactor`, and the `orig` delegate. Later presses still vote but do not replace it.
-2. When voting ends (`TPVotingSystem.TPVotingController_OnTPVotingEnded`), after unlocking, run the pending interaction if all of these hold:
-   - the interactable and the interactor's GameObject still exist,
-   - the interactor's body is alive,
-   - the interactable's `GetInteractability(interactor)` returns `Available`.
+### 4.3 Implementation notes
 
-   Otherwise just unlock as today. Clear the pending interaction either way.
-3. Clear the pending interaction whenever voting restarts (`TryStartVoting`) or the scene changes, so a press on one stage never fires on the next.
-4. Post a chat line when auto-starting, for example `Teleporter starting for <player>`, using `ChatHelper`'s style.
-5. Add a config entry, `AutoStartAfterVote` (bool, default `true`), in `Settings`. When `false`, keep the old press-twice behaviour.
+- Locking becomes **per exit**: while a vote runs, the target behaves as "press = vote"; other exits are blocked with the message from step 4.2.6. After the countdown unlock, only the target is unlocked. Pressing another exit later starts a new vote for it.
+- `VotingMachine` needs an unvote operation, and the end-condition check must handle counts going down (countdown cancel, vote reset).
+- For step 4.2.4, remember the original-interaction delegate (`orig`) and the `Interactor` of the first press, as `TPLocker.OnInteractionBegin` already receives them, and invoke `orig` directly so the lock check doesn't run again.
+- `TeleporterInteraction.OnInteractionBegin` handles both starting the event and leaving the stage. Only the charged state (leaving) is protected; check the teleporter's state (`activationState` / `isCharged`) in `_decomp\RoR2\TeleporterInteraction.cs`.
+- Chat matching for `f` reuses `CheckIfReadyMessage`'s approach; swallow the message like `r`.
 
-Notes:
-
-- `TeleporterInteraction.OnInteractionBegin` covers both starting the boss event (idle state) and leaving the stage (charged state); both should work through the same pending interaction.
-- Portals go through `GenericInteraction`; the same pending logic applies.
-- Invoke the remembered `orig` (as `TPLocker` already does with `orig.DynamicInvoke`), not the hooked method, so the lock check doesn't run again.
-
-### 4.2 Fix: non-portal `GenericInteraction` handling (existing bug)
+### 4.4 Fix: non-portal `GenericInteraction` handling (existing bug)
 
 In `TPLocker.GenericInteraction_GetInteractability` and `GenericInteraction_OnInteractionBegin`, the non-portal branch calls `orig(self, activator)` but has **no `return`**, so execution falls through into the vote logic:
 
@@ -80,21 +84,35 @@ In `TPLocker.GenericInteraction_GetInteractability` and `GenericInteraction_OnIn
 
 Add the missing `return` statements (`return orig(self, activator);` for the interactability hook).
 
-### 4.3 Build setup
+### 4.5 Config
 
-- `TPVoting.csproj`: the Release `OutputPath` points at Mordrog's own machine. Remove it, or point it at the VP profile through a `package.ps1` like `MonsoonLikeDrizzle`'s.
-- Update `RiskOfRain2.GameLibs` from `1.4.0.0-r.0` to the current game (`1.5.0-r.1`, as used in `MapChests/QoLChests/QoLChests.csproj`) and update `MMHOOK.RoR2` to match.
+| Setting | Default | Notes |
+|---|---|---|
+| `PlayerIsReadyMessages` | `r,rdy,ready` | Existing |
+| `PlayerCancelMessages` | `f` | New; comma-separated |
+| `MajorityVotesCountdownTime` | `30` | Existing |
+| `UserAutoVoteOnDeath` | `true` | Existing |
+| `IgnoredGameModes` | `InfiniteTowerRun` | Existing |
+| `VoteAfterTPEvent` | – | Remove; exits are always protected, the boss event never is |
+
+### 4.6 Build setup
+
+- `TPVoting.csproj`: the Release `OutputPath` points at Mordrog's own machine. Remove it, and add a `package.ps1` like `MonsoonLikeDrizzle`'s that builds and copies into the VP profile.
+- Update `RiskOfRain2.GameLibs` from `1.4.0.0-r.0` to the current game (`1.5.0-r.1`, as used in `F:\Mod\RoR2\MapChests\QoLChests\QoLChests.csproj`) and update `MMHOOK.RoR2` to match.
 - **Keep the plugin GUID `com.Mordrog.TPVoting`**, so the owner's existing config keeps working and BepInEx never loads the original alongside the fork. Bump `ModVer` and `manifest.json` to `1.5.0`.
 - Install by replacing `plugins\Mordrog-TPVoting\TPVoting.dll` in the VP profile. Back up the original DLL first, as `TPVoting.dll.bak`, outside the plugins folder so BepInEx doesn't scan it.
 
-## 5. Test plan (in game, multiplayer)
+## 5. Test plan (in game, 4 players if possible)
 
-- [ ] Press the teleporter before the boss; all players type `r`; the boss event starts with no second press.
-- [ ] After the boss (`VoteAfterTPEvent = true`): press the charged teleporter; when everyone is ready, the stage exits automatically.
-- [ ] Half ready: the countdown runs, then it auto-starts for the first presser.
-- [ ] Fewer than half ready: stays locked, nothing starts.
-- [ ] Everyone votes by chat only, no press: it just unlocks.
-- [ ] First presser dies or leaves before voting passes: it just unlocks, no error.
-- [ ] Portals (shop, gold, celestial, green): same behaviour as the teleporter.
-- [ ] Buttons and other non-portal interactions work normally while voting is active (4.2).
-- [ ] `AutoStartAfterVote = false` restores press-twice.
+- [ ] Start the boss event: no vote, starts immediately.
+- [ ] Press the charged teleporter: a vote starts, nobody teleports.
+- [ ] Second player types `r` (2 of 4): countdown starts.
+- [ ] One of them types `f` (1 of 4): countdown cancels.
+- [ ] Both type `f` (0 of 4): vote ends; pressing a portal now starts a new vote for the portal.
+- [ ] Everyone ready before 30 s: stage exits immediately with no extra press.
+- [ ] Countdown finishes with 2–3 ready: target unlocks, nobody moves; pressing it leaves.
+- [ ] During a vote, pressing a different exit shows the "vote already running" message.
+- [ ] Vote starter dies before everyone is ready: everyone ready still exits via another player, or just unlocks.
+- [ ] Portals (shop, gold, celestial, void, green): same flow.
+- [ ] Buttons and other non-portal interactions work normally during a vote (4.4).
+- [ ] Single player: no voting at all.
