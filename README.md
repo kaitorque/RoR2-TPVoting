@@ -34,6 +34,7 @@ While a vote is running, pressing a different exit only shows a reminder that a 
 ## Credits
 
 - Original mod: [Mordrog](https://thunderstore.io/package/Mordrog/) ([source](https://github.com/Mordrog/RoR2-TPVoting))
-- Fork: Kaitorque
+- Fork: Kaitorque ([source](https://github.com/kaitorque/RoR2-TPVoting))
+- Icon: the in-game teleporter icon from Risk of Rain 2
 
 See `CHANGELOG.md` for changes.
